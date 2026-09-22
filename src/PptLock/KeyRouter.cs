@@ -14,74 +14,73 @@ namespace PptLock;
 ///   Hook WH_KEYBOARD_LL  -> PODE bloquear a tecla, mas NÃO sabe o aparelho.
 ///   Raw Input (WM_INPUT) -> SABE o aparelho, mas NÃO pode bloquear.
 ///
-/// Problema de ordem: para cada tecla, o Windows chama o hook ANTES de postar
-/// o WM_INPUT. Enquanto o hook roda, o WM_INPUT daquela tecla ainda não
-/// existe, e não dá para esperar por ele dentro do hook: o Windows fica
-/// parado aguardando o hook terminar e só depois posta o WM_INPUT.
+/// Duas regras do Windows definem a solução:
+///   (a) o hook é chamado ANTES de o Raw Input ser gerado;
+///   (b) se o hook bloqueia um evento, o Raw Input desse evento NUNCA é
+///       gerado. Bloquear e esperar o WM_INPUT do mesmo evento não funciona:
+///       ele não chega. Esse era o erro da primeira versão da Etapa 2.
 ///
-/// Solução, "segura e decide":
+/// Mas cada toque tem DOIS eventos: apertar (down) e soltar (up). Então:
 ///
-///  1. No hook, se a tecla é candidata (tecla de passador + PowerPoint no
-///     estado certo), ela é ENGOLIDA na hora e entra numa fila de pendentes
-///     (_pending), com o momento em que chegou.
+///  1. DOWN de tecla candidata (tecla de passador + PowerPoint no estado
+///     certo): o hook BLOQUEIA e cria um pendente na fila (_pending).
+///     Repetições automáticas (tecla segurada) também são bloqueadas.
 ///
-///  2. Alguns milissegundos depois chega o WM_INPUT. Ele é casado com o
-///     primeiro pendente ainda sem aparelho que tenha a mesma tecla e o mesmo
-///     sentido (apertar/soltar). A partir daí o pendente sabe se veio do
-///     passador.
+///  2. UP da mesma tecla: o hook DEIXA PASSAR. Como não foi bloqueado, o
+///     Windows gera o WM_INPUT dele, que diz de qual aparelho veio. Um key-up
+///     solto na janela em foco é inofensivo (programas agem no down).
 ///
-///  3. A fila é resolvida em ordem (FIFO), a partir do início:
-///       - veio do passador     -> vira comando do PowerPoint (key-up é descartado);
-///       - veio de outro teclado -> a tecla é REENVIADA com SendInput, e a
-///         janela em foco a recebe normalmente, só alguns ms depois.
-///     Se o WM_INPUT não chegar em RawWaitTimeoutMs, a tecla é tratada como
-///     do operador e reenviada. Assim nenhuma tecla se perde, mesmo que o
-///     Raw Input falhe.
+///  3. Chega o WM_INPUT do UP: casamos com o pendente mais antigo da mesma
+///     tecla que já viu o UP. Aí sabemos a origem:
+///       - passador      -> comando do PowerPoint;
+///       - outro teclado -> reenviamos o par down+up com SendInput, e a
+///         janela em foco recebe a tecla normalmente.
+///     O custo é que a ação acontece ao SOLTAR o botão (dezenas de ms
+///     depois), o que é imperceptível num passador.
 ///
-///  4. Caso raro de ordem inversa (WM_INPUT antes do hook): o evento Raw fica
-///     guardado por EarlyRawKeepMs em _earlyRaw, e o hook procura ali antes
-///     de criar o pendente.
+///  4. Segurança (nenhuma tecla se perde):
+///       - UP visto, mas sem WM_INPUT em RawAfterUpTimeoutMs -> é tratada
+///         como tecla do operador e reenviada;
+///       - tecla segurada por mais de HoldTimeoutMs sem soltar (operador
+///         segurando a seta, por exemplo) -> é reenviada como do operador, e
+///         as repetições e o UP dela passam direto até soltar.
 ///
-/// Teclas reenviadas chegam de novo ao hook marcadas como "injetadas" e
-/// passam direto, então não há laço.
-///
-/// Soltar/apertar ficam pareados: se o "apertar" de uma tecla foi engolido,
-/// o "soltar" dela também passa pela fila, e assim o operador recebe o par
-/// completo e na ordem certa.
+/// A fila é resolvida em ordem (FIFO) para as teclas reenviadas chegarem na
+/// ordem em que foram digitadas. Teclas reenviadas voltam ao hook marcadas
+/// como "injetadas" e passam direto, sem laço.
 ///
 /// Tudo roda na thread da UI (hook, WM_INPUT e timer), então não há lock.
 /// </summary>
 internal sealed class KeyRouter : IDisposable
 {
-    private const int RawWaitTimeoutMs = 150;
-    private const int EarlyRawKeepMs = 60;
+    private const int RawAfterUpTimeoutMs = 120;
+    private const int HoldTimeoutMs = 500;
 
     private sealed class Pending
     {
-        public required KeyEvent Key { get; init; }
+        public required KeyEvent Down { get; init; }
         public required bool Shift { get; init; }
         public required long Tick { get; init; }
+        public KeyEvent? Up { get; set; }
+        public long UpTick { get; set; }
         public bool? FromPresenter { get; set; }
     }
 
     private readonly PowerPointController _ppt;
     private readonly PresenterMatcher _matcher;
     private readonly Func<EscapeAction> _escapeAction;
-    private readonly SynchronizationContext _ui;
     private readonly System.Windows.Forms.Timer _timer;
 
     private readonly LinkedList<Pending> _pending = new();
-    private readonly List<RawKey> _earlyRaw = new();
-    // Teclas cujo "apertar" engolimos e cujo "soltar" ainda não passou.
-    private readonly HashSet<int> _held = new();
+    // Teclas seguradas além do HoldTimeoutMs: já devolvidas ao operador, então
+    // repetições e o UP passam direto até ela ser solta.
+    private readonly HashSet<int> _passThrough = new();
 
     public KeyRouter(PowerPointController ppt, PresenterMatcher matcher, Func<EscapeAction> escapeAction)
     {
         _ppt = ppt;
         _matcher = matcher;
         _escapeAction = escapeAction;
-        _ui = SynchronizationContext.Current
-              ?? throw new InvalidOperationException("KeyRouter precisa ser criado na thread da UI.");
         _timer = new System.Windows.Forms.Timer { Interval = 15 };
         _timer.Tick += (_, _) => Flush();
     }
@@ -96,34 +95,41 @@ internal sealed class KeyRouter : IDisposable
     {
         // Nossas próprias reenviadas e as de outros programas passam direto.
         if (e.IsInjected) return false;
+        int vk = e.VirtualKey;
 
-        bool held = _held.Contains(e.VirtualKey);
-        if (e.IsDown)
+        if (_passThrough.Contains(vk))
         {
-            if (!held && !IsCandidate(e.VirtualKey)) return false;
-            _held.Add(e.VirtualKey); // auto-repeat de tecla segurada também cai aqui
-        }
-        else
-        {
-            if (!held) return false;
-            _held.Remove(e.VirtualKey);
+            if (!e.IsDown) _passThrough.Remove(vk);
+            return false;
         }
 
-        long now = Environment.TickCount64;
-        var p = new Pending { Key = e, Shift = IsKeyDown(VK_SHIFT), Tick = now };
+        var waitingUp = FindWaitingUp(vk);
 
-        int early = _earlyRaw.FindIndex(r => Matches(r, e) && now - r.Tick <= EarlyRawKeepMs);
-        if (early >= 0)
+        if (!e.IsDown)
         {
-            p.FromPresenter = _matcher.IsPresenter(_earlyRaw[early].Device);
-            _earlyRaw.RemoveAt(early);
-            // Resolver fora do hook: SendInput dentro do hook não é seguro.
-            _ui.Post(_ => Flush(), null);
+            // Deixa o UP passar: é ele que gera o WM_INPUT com o aparelho.
+            if (waitingUp is not null)
+            {
+                waitingUp.Up = e;
+                waitingUp.UpTick = Environment.TickCount64;
+            }
+            return false;
         }
 
-        _pending.AddLast(p);
+        if (waitingUp is not null) return true; // repetição automática: segura junto
+
+        if (!IsCandidate(vk)) return false;
+
+        _pending.AddLast(new Pending { Down = e, Shift = IsKeyDown(VK_SHIFT), Tick = Environment.TickCount64 });
         _timer.Enabled = true;
         return true;
+    }
+
+    private Pending? FindWaitingUp(int vk)
+    {
+        for (var node = _pending.First; node is not null; node = node.Next)
+            if (node.Value.Down.VirtualKey == vk && node.Value.Up is null) return node.Value;
+        return null;
     }
 
     private bool IsCandidate(int vk)
@@ -140,26 +146,18 @@ internal sealed class KeyRouter : IDisposable
 
     public void OnRaw(RawKey r)
     {
-        if (!KeyMap.IsPresenterKey(r.VirtualKey)) return;
-
+        if (!r.IsUp) return;
         for (var node = _pending.First; node is not null; node = node.Next)
         {
             var p = node.Value;
-            if (p.FromPresenter is null && Matches(r, p.Key))
+            if (p.Up is not null && p.FromPresenter is null && p.Down.VirtualKey == r.VirtualKey)
             {
                 p.FromPresenter = _matcher.IsPresenter(r.Device);
                 Flush();
                 return;
             }
         }
-
-        // Nenhum pendente esperando por ele: guarda caso o hook venha depois.
-        long now = r.Tick;
-        _earlyRaw.RemoveAll(x => now - x.Tick > EarlyRawKeepMs);
-        _earlyRaw.Add(r);
     }
-
-    private static bool Matches(RawKey r, KeyEvent e) => r.VirtualKey == e.VirtualKey && r.IsUp == !e.IsDown;
 
     // --------------------------------------------------------------- resolve
 
@@ -171,9 +169,22 @@ internal sealed class KeyRouter : IDisposable
             var p = node.Value;
             if (p.FromPresenter is null)
             {
-                if (now - p.Tick < RawWaitTimeoutMs) break; // ainda esperando o WM_INPUT
-                Log.Warn($"Sem Raw Input para {(Keys)p.Key.VirtualKey}; devolvendo a tecla.");
-                p.FromPresenter = false;
+                if (p.Up is not null)
+                {
+                    if (now - p.UpTick < RawAfterUpTimeoutMs) break; // esperando o WM_INPUT
+                    Log.Warn($"Sem Raw Input para {(Keys)p.Down.VirtualKey}; devolvendo a tecla.");
+                    p.FromPresenter = false;
+                }
+                else
+                {
+                    if (now - p.Tick < HoldTimeoutMs) break; // ainda apertada
+                    // Segurada demais: devolve o DOWN agora; o resto passa direto.
+                    _pending.RemoveFirst();
+                    _passThrough.Add(p.Down.VirtualKey);
+                    Log.Info($"{(Keys)p.Down.VirtualKey} segurada; tratada como teclado do operador.");
+                    Replay(p.Down);
+                    continue;
+                }
             }
             _pending.RemoveFirst();
 
@@ -181,11 +192,13 @@ internal sealed class KeyRouter : IDisposable
             {
                 if (p.FromPresenter == true)
                 {
-                    if (p.Key.IsDown) Execute(p);
+                    Execute(p);
                 }
                 else
                 {
-                    Replay(p.Key);
+                    // O UP original já passou; reenvia o par completo.
+                    Replay(p.Down);
+                    Replay(p.Up!.Value);
                 }
             }
             catch (Exception ex)
@@ -198,12 +211,13 @@ internal sealed class KeyRouter : IDisposable
 
     private void Execute(Pending p)
     {
-        var action = KeyMap.ToAction(p.Key.VirtualKey, p.Shift, _escapeAction());
+        var action = KeyMap.ToAction(p.Down.VirtualKey, p.Shift, _escapeAction());
         if (action is null)
         {
-            Log.Info($"Passador: {(Keys)p.Key.VirtualKey} ignorado.");
+            Log.Info($"Passador: {(Keys)p.Down.VirtualKey} ignorado.");
             return;
         }
+        Log.Info($"Passador: {(Keys)p.Down.VirtualKey} -> {action}");
         _ppt.Enqueue(action.Value);
     }
 
@@ -228,8 +242,12 @@ internal sealed class KeyRouter : IDisposable
     public void Dispose()
     {
         // Sai devolvendo tudo que estiver pendente.
-        foreach (var p in _pending) p.FromPresenter ??= false;
-        Flush();
+        foreach (var p in _pending)
+        {
+            Replay(p.Down);
+            if (p.Up is { } up) Replay(up);
+        }
+        _pending.Clear();
         _timer.Dispose();
     }
 }

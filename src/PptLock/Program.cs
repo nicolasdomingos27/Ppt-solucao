@@ -17,17 +17,35 @@ internal static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) => Log.Error("Exceção não tratada (UI)", e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-            Log.Error("Exceção não tratada", e.ExceptionObject as Exception);
+            Log.WriteNow("Exceção não tratada", e.ExceptionObject as Exception);
 
         ApplicationConfiguration.Initialize();
-        // O KeyRouter usa o contexto da UI; ele só é instalado sozinho quando o
-        // primeiro Control é criado, e aqui não há janela principal.
-        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
-        Log.Info($"PPT Lock iniciado. Pasta: {AppPaths.BaseDirectory}");
+        Log.Info($"PPT Lock {Application.ProductVersion} iniciado. Pasta: {AppPaths.BaseDirectory}");
+
+        if (AppPaths.LooksLikeInsideZip())
+        {
+            MessageBox.Show(
+                "Parece que o PPT Lock foi aberto de dentro do arquivo .zip.\n\n" +
+                "Assim ele não consegue guardar a configuração nem o log. Feche, extraia o .zip " +
+                "(botão direito > Extrair tudo) e abra o PptLock.exe da pasta extraída.",
+                "PPT Lock", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
 
         try
         {
-            Application.Run(new TrayContext());
+            TrayContext context;
+            try
+            {
+                context = new TrayContext();
+            }
+            catch (Exception ex)
+            {
+                Log.WriteNow("Falha ao iniciar", ex);
+                MessageBox.Show($"O PPT Lock não conseguiu iniciar:\n\n{ex.Message}\n\nDetalhes em:\n{Log.FilePath}",
+                    "PPT Lock", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            Application.Run(context);
         }
         finally
         {

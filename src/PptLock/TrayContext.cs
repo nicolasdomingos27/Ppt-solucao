@@ -27,6 +27,8 @@ internal sealed class TrayContext : ApplicationContext
         _hook.Install();
 
         var menu = new ContextMenuStrip();
+        menu.Items.Add(new ToolStripMenuItem($"PPT Lock versão {Application.ProductVersion.Split('+')[0]}") { Enabled = false });
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Reconfigurar passador", null, (_, _) => ShowSetup());
         menu.Items.Add("Abrir log", null, (_, _) => OpenLog());
         menu.Items.Add(new ToolStripSeparator());

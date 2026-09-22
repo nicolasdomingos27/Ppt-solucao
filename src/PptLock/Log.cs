@@ -33,6 +33,21 @@ internal static class Log
         Queue.TryAdd($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {level} {message}");
     }
 
+    /// <summary>Grava na hora, sem fila. Para erros fatais, quando o processo vai morrer.</summary>
+    public static void WriteNow(string message, Exception? ex = null)
+    {
+        try
+        {
+            Flush(TimeSpan.FromMilliseconds(500));
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} FATAL {message}" + (ex is null ? "" : $": {ex}");
+            File.AppendAllText(FilePath, line + Environment.NewLine, Encoding.UTF8);
+        }
+        catch
+        {
+            // sem onde gravar
+        }
+    }
+
     public static void Flush(TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
