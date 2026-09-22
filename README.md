@@ -6,9 +6,19 @@ janela estiver em foco. App de bandeja para Windows (C# .NET 8 / WinForms), sem 
 ## Status
 
 - [x] Etapa 1: protótipo, hook global + Next/Previous via COM (ainda sem distinguir o dispositivo)
-- [ ] Etapa 2: Raw Input + filtro pelo passador
-- [ ] Etapa 3: bandeja completa, config.json, reconexão, log
+- [x] Etapa 2: Raw Input + filtro pelo passador, config.json, mapeamento completo de teclas
+- [ ] Etapa 3: bandeja completa (cores, pausa, Ctrl+Alt+P), reconexão, log
 - [ ] Etapa 4: .exe single-file + README.txt de uso
+- [ ] Etapa 5: licenciamento (mensal/anual, 2 computadores por licença, 14 dias offline)
+
+## Como o filtro do passador funciona
+
+O hook de teclado pode bloquear teclas mas não sabe de qual aparelho vieram; o
+Raw Input sabe o aparelho mas não bloqueia, e chega *depois* do hook. Por isso
+as teclas candidatas são seguradas por alguns milissegundos até o Raw Input
+dizer a origem: do passador viram comando do PowerPoint; de outro teclado são
+reenviadas (SendInput) para a janela em foco. Sem resposta em 150 ms, a tecla é
+devolvida. Detalhes em `src/PptLock/KeyRouter.cs`.
 
 ## Compilar (Windows, .NET 8 SDK)
 

@@ -20,6 +20,9 @@ internal static class Program
             Log.Error("Exceção não tratada", e.ExceptionObject as Exception);
 
         ApplicationConfiguration.Initialize();
+        // O KeyRouter usa o contexto da UI; ele só é instalado sozinho quando o
+        // primeiro Control é criado, e aqui não há janela principal.
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         Log.Info($"PPT Lock iniciado. Pasta: {AppPaths.BaseDirectory}");
 
         try

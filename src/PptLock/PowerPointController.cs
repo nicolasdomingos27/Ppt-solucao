@@ -7,6 +7,11 @@ internal enum SlideAction
 {
     Next,
     Previous,
+    ToggleBlack,
+    ToggleWhite,
+    StartFromBeginning,
+    StartFromCurrent,
+    EndShow,
 }
 
 /// <summary>
@@ -31,7 +36,15 @@ internal sealed class PowerPointController : IDisposable
 
     private readonly BlockingCollection<SlideAction> _queue = new();
     private readonly Thread _thread;
+    // PpSlideShowState
+    private const int ppSlideShowRunning = 1;
+    private const int ppSlideShowBlackScreen = 3;
+    private const int ppSlideShowWhiteScreen = 4;
+    // PpSlideShowRangeType
+    private const int ppShowSlideRange = 2;
+
     private volatile bool _slideShowActive;
+    private volatile bool _hasPresentation;
     private string? _lastPollError; // evita repetir o mesmo erro no log a cada poll
 
     public PowerPointController()
@@ -43,6 +56,9 @@ internal sealed class PowerPointController : IDisposable
 
     /// <summary>Último estado conhecido (atualizado a cada ~400 ms).</summary>
     public bool IsSlideShowActive => _slideShowActive;
+
+    /// <summary>PowerPoint aberto com ao menos uma apresentação (para F5 funcionar).</summary>
+    public bool HasPresentation => _hasPresentation;
 
     /// <summary>Enfileira uma ação; retorna na hora (seguro para chamar do hook).</summary>
     public void Enqueue(SlideAction action) => _queue.TryAdd(action);
@@ -83,11 +99,12 @@ internal sealed class PowerPointController : IDisposable
     private void Poll()
     {
         using var com = new ComScope();
-        bool active;
+        bool active, hasPresentation;
         try
         {
             var app = com.GetPowerPoint();
-            active = app is not null && (int)com.Track(app.SlideShowWindows).Count > 0;
+            hasPresentation = app is not null && (int)com.Track(app.Presentations).Count > 0;
+            active = hasPresentation && (int)com.Track(app!.SlideShowWindows).Count > 0;
             _lastPollError = null;
         }
         catch (COMException ex) when (IsBusy(ex))
@@ -98,8 +115,10 @@ internal sealed class PowerPointController : IDisposable
         {
             if (ex.Message != _lastPollError) Log.Warn($"Falha ao consultar PowerPoint: {ex.Message}");
             _lastPollError = ex.Message;
-            active = false;
+            active = hasPresentation = false;
         }
+
+        _hasPresentation = hasPresentation;
 
         if (active != _slideShowActive)
         {
@@ -117,6 +136,17 @@ internal sealed class PowerPointController : IDisposable
             try
             {
                 var view = GetSlideShowView(com);
+                if (action is SlideAction.StartFromBeginning or SlideAction.StartFromCurrent)
+                {
+                    if (view is not null)
+                    {
+                        // Já está apresentando: F5 acidental não pode voltar ao slide 1 ao vivo.
+                        Log.Info($"{action} ignorado: apresentação já em andamento.");
+                        return;
+                    }
+                    StartShow(com, fromCurrent: action == SlideAction.StartFromCurrent);
+                    return;
+                }
                 if (view is null)
                 {
                     Log.Warn($"{action}: nenhuma apresentação em andamento.");
@@ -126,6 +156,9 @@ internal sealed class PowerPointController : IDisposable
                 {
                     case SlideAction.Next: view.Next(); break;
                     case SlideAction.Previous: view.Previous(); break;
+                    case SlideAction.ToggleBlack: ToggleScreen(view, ppSlideShowBlackScreen); break;
+                    case SlideAction.ToggleWhite: ToggleScreen(view, ppSlideShowWhiteScreen); break;
+                    case SlideAction.EndShow: view.Exit(); break;
                 }
                 Log.Info($"{action} executado.");
                 return;
@@ -142,14 +175,105 @@ internal sealed class PowerPointController : IDisposable
         }
     }
 
+    /// <summary>
+    /// View da apresentação em andamento. Com mais de uma rodando, usa a última
+    /// iniciada (a mais recente na coleção SlideShowWindows).
+    /// </summary>
     private static dynamic? GetSlideShowView(ComScope com)
     {
         var app = com.GetPowerPoint();
         if (app is null) return null;
         var windows = com.Track(app.SlideShowWindows);
-        if ((int)windows.Count == 0) return null;
-        var window = com.Track(windows.Item(1));
+        int count = (int)windows.Count;
+        if (count == 0) return null;
+        var window = com.Track(windows.Item(count));
         return com.Track(window.View);
+    }
+
+    private static void ToggleScreen(dynamic view, int screenState)
+    {
+        view.State = (int)view.State == screenState ? ppSlideShowRunning : screenState;
+    }
+
+    /// <summary>
+    /// F5 / Shift+F5. Usa um intervalo temporário nas configurações da
+    /// apresentação e depois restaura o que o usuário tinha (inclusive o
+    /// "Saved", para o PowerPoint não perguntar se quer salvar ao fechar).
+    /// </summary>
+    private static void StartShow(ComScope com, bool fromCurrent)
+    {
+        var app = com.GetPowerPoint();
+        if (app is null) return;
+        var presentation = GetTargetPresentation(com, app);
+        if (presentation is null)
+        {
+            Log.Warn("F5: nenhuma apresentação aberta.");
+            return;
+        }
+
+        int total = (int)com.Track(presentation.Slides).Count;
+        if (total == 0) return;
+        int start = fromCurrent ? Math.Clamp(GetCurrentSlideIndex(com, presentation), 1, total) : 1;
+
+        var settings = com.Track(presentation.SlideShowSettings);
+        int oldSaved = (int)presentation.Saved;
+        int oldRange = (int)settings.RangeType;
+        int oldStart = (int)settings.StartingSlide;
+        int oldEnd = (int)settings.EndingSlide;
+
+        settings.RangeType = ppShowSlideRange;
+        settings.StartingSlide = start;
+        settings.EndingSlide = total;
+        try
+        {
+            com.Track(settings.Run());
+            Log.Info($"Apresentação iniciada no slide {start} de {total}.");
+        }
+        finally
+        {
+            try
+            {
+                settings.StartingSlide = oldStart;
+                settings.EndingSlide = oldEnd;
+                settings.RangeType = oldRange;
+                presentation.Saved = oldSaved;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Não foi possível restaurar as configurações da apresentação: {ex.Message}");
+            }
+        }
+    }
+
+    private static dynamic? GetTargetPresentation(ComScope com, dynamic app)
+    {
+        var presentations = com.Track(app.Presentations);
+        if ((int)presentations.Count == 0) return null;
+        try
+        {
+            return com.Track(app.ActivePresentation);
+        }
+        catch (COMException)
+        {
+            return com.Track(presentations.Item(1)); // sem janela ativa
+        }
+    }
+
+    private static int GetCurrentSlideIndex(ComScope com, dynamic presentation)
+    {
+        try
+        {
+            var windows = com.Track(presentation.Windows);
+            if ((int)windows.Count == 0) return 1;
+            var window = com.Track(windows.Item(1));
+            var view = com.Track(window.View);
+            var slide = com.Track(view.Slide);
+            return (int)slide.SlideIndex;
+        }
+        catch (Exception)
+        {
+            return 1; // modos de exibição sem "slide atual" (ex.: estrutura de tópicos)
+        }
     }
 
     private static bool IsBusy(COMException ex) =>
