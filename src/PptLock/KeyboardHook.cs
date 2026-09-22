@@ -4,14 +4,13 @@ using static PptLock.NativeMethods;
 namespace PptLock;
 
 /// <summary>Uma tecla vista pelo hook global.</summary>
-internal readonly record struct KeyEvent(int VirtualKey, bool IsDown, bool IsInjected, uint Time);
+internal readonly record struct KeyEvent(int VirtualKey, int ScanCode, bool IsDown, bool IsExtended, bool IsInjected);
 
 /// <summary>
 /// Hook global WH_KEYBOARD_LL. Precisa ser instalado numa thread com loop de
 /// mensagens (a thread da UI do WinForms). O callback tem que ser rápido: se
 /// demorar mais que LowLevelHooksTimeout o Windows remove o hook sem avisar,
-/// por isso aqui só se decide "engolir ou deixar passar"; o trabalho de COM
-/// acontece em outra thread.
+/// por isso aqui só se decide "engolir ou deixar passar"; o resto acontece fora.
 /// </summary>
 internal sealed class KeyboardHook : IDisposable
 {
@@ -58,8 +57,8 @@ internal sealed class KeyboardHook : IDisposable
                 bool isUp = msg is WM_KEYUP or WM_SYSKEYUP;
                 if (isDown || isUp)
                 {
-                    var e = new KeyEvent((int)data.vkCode, isDown,
-                        (data.flags & LLKHF_INJECTED) != 0, data.time);
+                    var e = new KeyEvent((int)data.vkCode, (int)data.scanCode, isDown,
+                        (data.flags & LLKHF_EXTENDED) != 0, (data.flags & LLKHF_INJECTED) != 0);
                     if (_handler(e)) return (IntPtr)1; // engole
                 }
             }
