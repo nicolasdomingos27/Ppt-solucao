@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using static PptLock.NativeMethods;
+using static BackgroundPresenter.NativeMethods;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>Uma tecla vista pelo Raw Input: sabe de qual aparelho veio, mas não pode bloqueá-la.</summary>
 internal readonly record struct RawKey(IntPtr Device, int VirtualKey, bool IsUp, long Tick);
@@ -24,7 +24,7 @@ internal sealed class RawInputListener : NativeWindow, IDisposable
 
     public RawInputListener()
     {
-        CreateHandle(new CreateParams { Parent = HWND_MESSAGE, Caption = "PptLock.RawInput" });
+        CreateHandle(new CreateParams { Parent = HWND_MESSAGE, Caption = "BackgroundPresenter.RawInput" });
         var devices = new[]
         {
             new RAWINPUTDEVICE

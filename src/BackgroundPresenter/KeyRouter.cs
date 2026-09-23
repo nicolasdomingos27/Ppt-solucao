@@ -1,6 +1,6 @@
-using static PptLock.NativeMethods;
+using static BackgroundPresenter.NativeMethods;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>
 /// Decide, para cada tecla, se ela vira comando do PowerPoint ou se segue

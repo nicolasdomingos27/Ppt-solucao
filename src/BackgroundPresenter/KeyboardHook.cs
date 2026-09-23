@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using static PptLock.NativeMethods;
+using static BackgroundPresenter.NativeMethods;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>Uma tecla vista pelo hook global.</summary>
 internal readonly record struct KeyEvent(int VirtualKey, int ScanCode, bool IsDown, bool IsExtended, bool IsInjected);

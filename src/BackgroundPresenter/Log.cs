@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>
 /// Log em arquivo ao lado do .exe. A escrita acontece numa thread própria para
@@ -14,11 +14,11 @@ internal static class Log
     private static readonly BlockingCollection<string> Queue = new(boundedCapacity: 10_000);
     private static readonly Thread Writer;
 
-    public static string FilePath { get; } = Path.Combine(AppPaths.BaseDirectory, "ppt-lock.log");
+    public static string FilePath { get; } = Path.Combine(AppPaths.BaseDirectory, "background-presenter.log");
 
     static Log()
     {
-        Writer = new Thread(WriteLoop) { IsBackground = true, Name = "PptLock.Log" };
+        Writer = new Thread(WriteLoop) { IsBackground = true, Name = "BackgroundPresenter.Log" };
         Writer.Start();
     }
 

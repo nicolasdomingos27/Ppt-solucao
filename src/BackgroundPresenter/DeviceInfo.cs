@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using static PptLock.NativeMethods;
+using static BackgroundPresenter.NativeMethods;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>Identificação de um teclado (ou passador) visto pelo Raw Input.</summary>
 internal sealed record DeviceInfo(string Path, string? VendorId, string? ProductId, string? Interface, string Name)
@@ -105,6 +105,36 @@ internal sealed class PresenterMatcher
     }
 
     public void Reset() => _cache.Clear();
+
+    /// <summary>
+    /// Procura o passador entre os teclados conectados agora. Chamado ao
+    /// iniciar e quando um aparelho é conectado/removido.
+    /// </summary>
+    public bool IsConnected()
+    {
+        if (_presenter is null) return false;
+        try
+        {
+            uint count = 0;
+            uint size = (uint)Marshal.SizeOf<RAWINPUTDEVICELIST>();
+            GetRawInputDeviceList(null, ref count, size);
+            if (count == 0) return false;
+            var list = new RAWINPUTDEVICELIST[count];
+            uint n = GetRawInputDeviceList(list, ref count, size);
+            if (n == uint.MaxValue) return false;
+            for (int i = 0; i < n; i++)
+            {
+                if (list[i].dwType != RIM_TYPEKEYBOARD) continue;
+                var info = DeviceInfo.Query(list[i].hDevice);
+                if (info is not null && _presenter.Matches(info)) return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Erro ao listar dispositivos", ex);
+        }
+        return false;
+    }
 
     public bool IsPresenter(IntPtr hDevice)
     {

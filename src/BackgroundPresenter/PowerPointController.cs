@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 
-namespace PptLock;
+namespace BackgroundPresenter;
+
+/// <summary>Slide atual da apresentação em andamento, para a dica do ícone.</summary>
+internal sealed record SlideShowInfo(int Slide, int Total, string FileName);
 
 internal enum SlideAction
 {
@@ -45,11 +48,12 @@ internal sealed class PowerPointController : IDisposable
 
     private volatile bool _slideShowActive;
     private volatile bool _hasPresentation;
+    private volatile SlideShowInfo? _showInfo;
     private string? _lastPollError; // evita repetir o mesmo erro no log a cada poll
 
     public PowerPointController()
     {
-        _thread = new Thread(Run) { IsBackground = true, Name = "PptLock.COM" };
+        _thread = new Thread(Run) { IsBackground = true, Name = "BackgroundPresenter.COM" };
         _thread.SetApartmentState(ApartmentState.STA);
         _thread.Start();
     }
@@ -59,6 +63,9 @@ internal sealed class PowerPointController : IDisposable
 
     /// <summary>PowerPoint aberto com ao menos uma apresentação (para F5 funcionar).</summary>
     public bool HasPresentation => _hasPresentation;
+
+    /// <summary>Slide X de Y da apresentação em andamento (null se não houver).</summary>
+    public SlideShowInfo? ShowInfo => _showInfo;
 
     /// <summary>Enfileira uma ação; retorna na hora (seguro para chamar do hook).</summary>
     public void Enqueue(SlideAction action) => _queue.TryAdd(action);
@@ -105,6 +112,7 @@ internal sealed class PowerPointController : IDisposable
             var app = com.GetPowerPoint();
             hasPresentation = app is not null && (int)com.Track(app.Presentations).Count > 0;
             active = hasPresentation && (int)com.Track(app!.SlideShowWindows).Count > 0;
+            _showInfo = active ? ReadShowInfo(com) ?? _showInfo : null;
             _lastPollError = null;
         }
         catch (COMException ex) when (IsBusy(ex))
@@ -116,6 +124,7 @@ internal sealed class PowerPointController : IDisposable
             if (ex.Message != _lastPollError) Log.Warn($"Falha ao consultar PowerPoint: {ex.Message}");
             _lastPollError = ex.Message;
             active = hasPresentation = false;
+            _showInfo = null;
         }
 
         _hasPresentation = hasPresentation;
@@ -188,6 +197,26 @@ internal sealed class PowerPointController : IDisposable
         if (count == 0) return null;
         var window = com.Track(windows.Item(count));
         return com.Track(window.View);
+    }
+
+    private static SlideShowInfo? ReadShowInfo(ComScope com)
+    {
+        try
+        {
+            var app = com.GetPowerPoint();
+            if (app is null) return null;
+            var windows = com.Track(app.SlideShowWindows);
+            var window = com.Track(windows.Item((int)windows.Count));
+            var presentation = com.Track(window.Presentation);
+            int total = (int)com.Track(presentation.Slides).Count;
+            var view = com.Track(window.View);
+            var slide = com.Track(view.Slide);
+            return new SlideShowInfo((int)slide.SlideIndex, total, (string)presentation.Name);
+        }
+        catch (Exception)
+        {
+            return null; // ex.: tela preta do fim da apresentação não tem "slide"
+        }
     }
 
     private static void ToggleScreen(dynamic view, int screenState)

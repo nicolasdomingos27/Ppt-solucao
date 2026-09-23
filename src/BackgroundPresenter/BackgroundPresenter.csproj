@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BackgroundPresenter</AssemblyName>
+    <RootNamespace>BackgroundPresenter</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.4.0</Version>
+    <Product>Background Presenter</Product>
+    <AssemblyTitle>Background Presenter</AssemblyTitle>
+    <Description>Mantém o passador de slides controlando a apresentação, mesmo com outra janela em foco.</Description>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <!-- Permite compilar/verificar fora do Windows; não altera o binário gerado. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.ico" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

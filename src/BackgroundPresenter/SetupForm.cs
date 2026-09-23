@@ -1,4 +1,4 @@
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>
 /// Tela de identificação do passador: "Aperte qualquer botão do passador".
@@ -22,7 +22,8 @@ internal sealed class SetupForm : Form
     {
         _rawInput = rawInput;
 
-        Text = "PPT Lock — configurar passador";
+        Text = "Background Presenter — configurar passador";
+        Icon = AppIcons.App;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;

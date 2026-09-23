@@ -1,6 +1,6 @@
-using static PptLock.NativeMethods;
+using static BackgroundPresenter.NativeMethods;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 /// <summary>
 /// Controle do Sumatra PDF. Ele não tem uma API como o COM do PowerPoint,
@@ -34,6 +34,18 @@ internal sealed class SumatraController : IDisposable
 
     /// <summary>Há um Sumatra em tela cheia/modo apresentação.</summary>
     public bool IsPresenting => _frame != IntPtr.Zero;
+
+    /// <summary>Nome do PDF em tela cheia (o título da janela é "arquivo.pdf - SumatraPDF").</summary>
+    public string? DocumentName
+    {
+        get
+        {
+            if (_frame == IntPtr.Zero) return null;
+            var title = GetWindowText(_frame);
+            int dash = title.LastIndexOf(" - ", StringComparison.Ordinal);
+            return dash > 0 ? title[..dash] : title;
+        }
+    }
 
     private void Poll()
     {

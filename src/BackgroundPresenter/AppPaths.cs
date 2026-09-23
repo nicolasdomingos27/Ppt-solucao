@@ -1,4 +1,4 @@
-namespace PptLock;
+namespace BackgroundPresenter;
 
 internal static class AppPaths
 {

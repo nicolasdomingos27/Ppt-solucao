@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace PptLock;
+namespace BackgroundPresenter;
 
 internal static class NativeMethods
 {
@@ -146,6 +146,31 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetRawInputDeviceInfoW")]
     public static extern uint GetRawInputDeviceInfo(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RAWINPUTDEVICELIST
+    {
+        public IntPtr hDevice;
+        public uint dwType;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetRawInputDeviceList([Out] RAWINPUTDEVICELIST[]? pRawInputDeviceList,
+        ref uint puiNumDevices, uint cbSize);
+
+    // ---------- Atalho global (Ctrl+Alt+P) ----------
+    public const int WM_HOTKEY = 0x0312;
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_NOREPEAT = 0x4000;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
     // ---------- HID (nome do aparelho) ----------
     public const uint FILE_SHARE_READ = 0x1;
     public const uint FILE_SHARE_WRITE = 0x2;
@@ -223,6 +248,15 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    public static string GetWindowText(IntPtr hWnd)
+    {
+        var sb = new System.Text.StringBuilder(512);
+        return GetWindowText(hWnd, sb, sb.Capacity) > 0 ? sb.ToString() : "";
+    }
 
     public static string GetClassName(IntPtr hWnd)
     {
