@@ -11,6 +11,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly KeyRouter _router;
     private readonly KeyboardHook _hook;
     private readonly NotifyIcon _icon;
+    private readonly ToolStripMenuItem _arrowsItem;
     private SetupForm? _setup;
 
     public TrayContext()
@@ -21,7 +22,8 @@ internal sealed class TrayContext : ApplicationContext
         _matcher = new PresenterMatcher(_config.Presenter);
 
         _rawInput = new RawInputListener();
-        _router = new KeyRouter(_ppt, _sumatra, _matcher, () => _config.EscapeAction);
+        _router = new KeyRouter(_ppt, _sumatra, _matcher, () => _config.EscapeAction,
+            () => _config.KeyboardArrowsControlSlides);
         _rawInput.KeyReceived += _router.OnRaw;
         _rawInput.DevicesChanged += OnDevicesChanged;
 
@@ -31,6 +33,14 @@ internal sealed class TrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem($"PPT Lock versão {Application.ProductVersion.Split('+')[0]}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+        _arrowsItem = new ToolStripMenuItem("Setas do teclado também passam slide")
+        {
+            Checked = _config.KeyboardArrowsControlSlides,
+            ToolTipText = "Modo reserva: se o passador falhar, as setas de qualquer teclado\n" +
+                          "controlam a apresentação, mesmo com outra janela em foco.",
+        };
+        _arrowsItem.Click += (_, _) => ToggleArrows();
+        menu.Items.Add(_arrowsItem);
         menu.Items.Add("Reconfigurar passador", null, (_, _) => ShowSetup());
         menu.Items.Add("Abrir log", null, (_, _) => OpenLog());
         menu.Items.Add(new ToolStripSeparator());
@@ -56,10 +66,25 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    private void ToggleArrows()
+    {
+        _config.KeyboardArrowsControlSlides = !_config.KeyboardArrowsControlSlides;
+        _arrowsItem.Checked = _config.KeyboardArrowsControlSlides;
+        _config.TrySave();
+        Log.Info(_config.KeyboardArrowsControlSlides
+            ? "Modo reserva LIGADO: setas do teclado passam slide."
+            : "Modo reserva DESLIGADO.");
+        _icon.ShowBalloonTip(3000, "PPT Lock", _config.KeyboardArrowsControlSlides
+            ? "Setas do teclado agora passam slide, de qualquer janela."
+            : "Setas do teclado voltaram ao normal.", ToolTipIcon.Info);
+        ApplyPresenter();
+    }
+
     private void ApplyPresenter()
     {
         _matcher.Presenter = _config.Presenter;
-        _router.Enabled = _config.Presenter is not null && _setup is null;
+        // O modo reserva funciona mesmo sem passador configurado.
+        _router.Enabled = (_config.Presenter is not null || _config.KeyboardArrowsControlSlides) && _setup is null;
         var text = _config.Presenter is null ? "PPT Lock — passador não configurado" : $"PPT Lock — {_config.Presenter.Name}";
         _icon.Text = text.Length > 63 ? text[..63] : text; // limite do Windows
     }

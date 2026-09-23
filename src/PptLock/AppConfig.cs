@@ -54,6 +54,12 @@ internal sealed class AppConfig
     public PresenterConfig? Presenter { get; set; }
     public EscapeAction EscapeAction { get; set; } = EscapeAction.Ignore;
 
+    /// <summary>
+    /// Modo reserva: as setas de QUALQUER teclado também passam slide,
+    /// independente da janela em foco (para quando o passador falha).
+    /// </summary>
+    public bool KeyboardArrowsControlSlides { get; set; }
+
     public static AppConfig Load()
     {
         try

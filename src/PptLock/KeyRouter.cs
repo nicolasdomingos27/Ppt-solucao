@@ -38,6 +38,10 @@ namespace PptLock;
 ///     O custo é que a ação acontece ao SOLTAR o botão (dezenas de ms
 ///     depois), o que é imperceptível num passador.
 ///
+///  Modo reserva ("setas do teclado também passam slide"): as setas de
+///  qualquer teclado já são marcadas como "do passador" no hook, sem esperar o
+///  Raw Input, e a ação acontece ao apertar.
+///
 ///  4. Segurança (nenhuma tecla se perde):
 ///       - UP visto, mas sem WM_INPUT em RawAfterUpTimeoutMs -> é tratada
 ///         como tecla do operador e reenviada;
@@ -70,6 +74,7 @@ internal sealed class KeyRouter : IDisposable
     private readonly SumatraController _sumatra;
     private readonly PresenterMatcher _matcher;
     private readonly Func<EscapeAction> _escapeAction;
+    private readonly Func<bool> _arrowsFromAnyKeyboard;
     private readonly System.Windows.Forms.Timer _timer;
 
     private readonly LinkedList<Pending> _pending = new();
@@ -78,8 +83,9 @@ internal sealed class KeyRouter : IDisposable
     private readonly HashSet<int> _passThrough = new();
 
     public KeyRouter(PowerPointController ppt, SumatraController sumatra, PresenterMatcher matcher,
-        Func<EscapeAction> escapeAction)
+        Func<EscapeAction> escapeAction, Func<bool> arrowsFromAnyKeyboard)
     {
+        _arrowsFromAnyKeyboard = arrowsFromAnyKeyboard;
         _ppt = ppt;
         _sumatra = sumatra;
         _matcher = matcher;
@@ -123,7 +129,11 @@ internal sealed class KeyRouter : IDisposable
 
         if (!IsCandidate(vk)) return false;
 
-        _pending.AddLast(new Pending { Down = e, Shift = IsKeyDown(VK_SHIFT), Tick = Environment.TickCount64 });
+        var pending = new Pending { Down = e, Shift = IsKeyDown(VK_SHIFT), Tick = Environment.TickCount64 };
+        // Modo reserva: seta de qualquer teclado vale como passador. Resolve no
+        // próximo tick do timer (não executa nada dentro do hook).
+        if (KeyMap.IsArrow(vk) && _arrowsFromAnyKeyboard()) pending.FromPresenter = true;
+        _pending.AddLast(pending);
         _timer.Enabled = true;
         return true;
     }
@@ -202,7 +212,7 @@ internal sealed class KeyRouter : IDisposable
                 {
                     // O UP original já passou; reenvia o par completo.
                     Replay(p.Down);
-                    Replay(p.Up!.Value);
+                    if (p.Up is { } up) Replay(up);
                 }
             }
             catch (Exception ex)
@@ -247,7 +257,7 @@ internal sealed class KeyRouter : IDisposable
         {
             // Sumatra sumiu entre a detecção e agora: não perder o toque.
             Replay(p.Down);
-            Replay(p.Up!.Value);
+            if (p.Up is { } up) Replay(up);
         }
     }
 
@@ -288,6 +298,8 @@ internal static class KeyMap
     public static bool IsPresenterKey(int vk) => (Keys)vk is
         Keys.PageDown or Keys.PageUp or Keys.Right or Keys.Left or Keys.Down or Keys.Up or
         Keys.Space or Keys.Enter or Keys.B or Keys.W or Keys.OemPeriod or Keys.F5 or Keys.Escape;
+
+    public static bool IsArrow(int vk) => (Keys)vk is Keys.Right or Keys.Left or Keys.Down or Keys.Up;
 
     /// <summary>F5 serve para iniciar a apresentação, então vale mesmo sem show rodando.</summary>
     public static bool WorksWithoutSlideShow(int vk) => (Keys)vk == Keys.F5;
