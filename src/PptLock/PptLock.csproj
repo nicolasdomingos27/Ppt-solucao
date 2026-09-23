@@ -9,7 +9,7 @@
     <AssemblyName>PptLock</AssemblyName>
     <RootNamespace>PptLock</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.2.1</Version>
+    <Version>0.3.0</Version>
     <Product>PPT Lock</Product>
     <!-- Permite compilar/verificar fora do Windows; não altera o binário gerado. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

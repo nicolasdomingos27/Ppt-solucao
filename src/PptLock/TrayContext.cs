@@ -5,6 +5,7 @@ internal sealed class TrayContext : ApplicationContext
 {
     private readonly AppConfig _config;
     private readonly PowerPointController _ppt;
+    private readonly SumatraController _sumatra;
     private readonly RawInputListener _rawInput;
     private readonly PresenterMatcher _matcher;
     private readonly KeyRouter _router;
@@ -16,10 +17,11 @@ internal sealed class TrayContext : ApplicationContext
     {
         _config = AppConfig.Load();
         _ppt = new PowerPointController();
+        _sumatra = new SumatraController();
         _matcher = new PresenterMatcher(_config.Presenter);
 
         _rawInput = new RawInputListener();
-        _router = new KeyRouter(_ppt, _matcher, () => _config.EscapeAction);
+        _router = new KeyRouter(_ppt, _sumatra, _matcher, () => _config.EscapeAction);
         _rawInput.KeyReceived += _router.OnRaw;
         _rawInput.DevicesChanged += OnDevicesChanged;
 
@@ -120,6 +122,7 @@ internal sealed class TrayContext : ApplicationContext
         _router.Dispose();
         _rawInput.Dispose();
         _ppt.Dispose();
+        _sumatra.Dispose();
         _icon.Visible = false;
         _icon.Dispose();
         base.ExitThreadCore();

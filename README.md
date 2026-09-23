@@ -7,6 +7,7 @@ janela estiver em foco. App de bandeja para Windows (C# .NET 8 / WinForms), sem 
 
 - [x] Etapa 1: protótipo, hook global + Next/Previous via COM (ainda sem distinguir o dispositivo)
 - [x] Etapa 2: Raw Input + filtro pelo passador, config.json, mapeamento completo de teclas
+- [x] Extra: Sumatra PDF em tela cheia/modo apresentação (teclas entregues via PostMessage)
 - [ ] Etapa 3: bandeja completa (cores, pausa, Ctrl+Alt+P), reconexão, log
 - [ ] Etapa 4: .exe single-file + README.txt de uso
 - [ ] Etapa 5: licenciamento (mensal/anual, 2 computadores por licença, 14 dias offline)

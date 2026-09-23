@@ -67,6 +67,7 @@ internal sealed class KeyRouter : IDisposable
     }
 
     private readonly PowerPointController _ppt;
+    private readonly SumatraController _sumatra;
     private readonly PresenterMatcher _matcher;
     private readonly Func<EscapeAction> _escapeAction;
     private readonly System.Windows.Forms.Timer _timer;
@@ -76,9 +77,11 @@ internal sealed class KeyRouter : IDisposable
     // repetições e o UP passam direto até ela ser solta.
     private readonly HashSet<int> _passThrough = new();
 
-    public KeyRouter(PowerPointController ppt, PresenterMatcher matcher, Func<EscapeAction> escapeAction)
+    public KeyRouter(PowerPointController ppt, SumatraController sumatra, PresenterMatcher matcher,
+        Func<EscapeAction> escapeAction)
     {
         _ppt = ppt;
+        _sumatra = sumatra;
         _matcher = matcher;
         _escapeAction = escapeAction;
         _timer = new System.Windows.Forms.Timer { Interval = 15 };
@@ -139,7 +142,8 @@ internal sealed class KeyRouter : IDisposable
         if (IsKeyDown(VK_CONTROL) || IsKeyDown(VK_MENU) || IsKeyDown(VK_LWIN) || IsKeyDown(VK_RWIN))
             return false;
         if (!KeyMap.IsPresenterKey(vk)) return false;
-        return KeyMap.WorksWithoutSlideShow(vk) ? _ppt.HasPresentation : _ppt.IsSlideShowActive;
+        if (_ppt.IsSlideShowActive || _sumatra.IsPresenting) return true;
+        return KeyMap.WorksWithoutSlideShow(vk) && _ppt.HasPresentation;
     }
 
     // ------------------------------------------------------------- Raw Input
@@ -209,8 +213,17 @@ internal sealed class KeyRouter : IDisposable
         _timer.Enabled = _pending.Count > 0;
     }
 
+    /// <summary>
+    /// Prioridade: apresentação do PowerPoint em andamento > Sumatra em tela
+    /// cheia > (só F5) iniciar a apresentação do PowerPoint.
+    /// </summary>
     private void Execute(Pending p)
     {
+        if (!_ppt.IsSlideShowActive && _sumatra.IsPresenting)
+        {
+            ExecuteSumatra(p);
+            return;
+        }
         var action = KeyMap.ToAction(p.Down.VirtualKey, p.Shift, _escapeAction());
         if (action is null)
         {
@@ -219,6 +232,23 @@ internal sealed class KeyRouter : IDisposable
         }
         Log.Info($"Passador: {(Keys)p.Down.VirtualKey} -> {action}");
         _ppt.Enqueue(action.Value);
+    }
+
+    private void ExecuteSumatra(Pending p)
+    {
+        var vk = (Keys)p.Down.VirtualKey;
+        // F5 no Sumatra liga/desliga o modo apresentação: ao vivo, sairia da tela cheia.
+        if (vk == Keys.F5 || (vk == Keys.Escape && _escapeAction() != EscapeAction.EndShow))
+        {
+            Log.Info($"Passador: {vk} ignorado no Sumatra.");
+            return;
+        }
+        if (!_sumatra.SendKey(p.Down) && vk != Keys.Escape)
+        {
+            // Sumatra sumiu entre a detecção e agora: não perder o toque.
+            Replay(p.Down);
+            Replay(p.Up!.Value);
+        }
     }
 
     /// <summary>Devolve a tecla do operador para a janela em foco.</summary>
