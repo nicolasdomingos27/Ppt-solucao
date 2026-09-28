@@ -38,6 +38,12 @@ namespace BackgroundPresenter;
 ///     O custo é que a ação acontece ao SOLTAR o botão (dezenas de ms
 ///     depois), o que é imperceptível num passador.
 ///
+///  Software do fabricante (ex.: Logi Options+ com o Spotlight): esses
+///  programas leem o passador por conta própria e GERAM as teclas com
+///  SendInput. Elas chegam ao hook marcadas como "injetadas" e sem aparelho no
+///  Raw Input. Se o passador configurado é desse tipo, teclas injetadas
+///  candidatas valem como passador (menos as nossas, marcadas com ReplayTag).
+///
 ///  Modo reserva ("setas do teclado também passam slide"): as setas de
 ///  qualquer teclado já são marcadas como "do passador" no hook, sem esperar o
 ///  Raw Input, e a ação acontece ao apertar.
@@ -57,6 +63,9 @@ namespace BackgroundPresenter;
 /// </summary>
 internal sealed class KeyRouter : IDisposable
 {
+    /// <summary>Marca (dwExtraInfo) das teclas que nós mesmos reenviamos.</summary>
+    public static readonly IntPtr ReplayTag = new(0x42505253); // "BPRS"
+
     private const int RawAfterUpTimeoutMs = 120;
     private const int HoldTimeoutMs = 500;
 
@@ -102,8 +111,14 @@ internal sealed class KeyRouter : IDisposable
     /// <summary>Chamado pelo hook. true = engolir a tecla.</summary>
     public bool OnHook(KeyEvent e)
     {
-        // Nossas próprias reenviadas e as de outros programas passam direto.
-        if (e.IsInjected) return false;
+        // Teclas injetadas: as nossas passam direto; as de outros programas só
+        // contam se o passador configurado é "software do fabricante".
+        bool fromSoftware = false;
+        if (e.IsInjected)
+        {
+            if (e.ExtraInfo == ReplayTag || !_matcher.AcceptsSoftwareKeys) return false;
+            fromSoftware = true;
+        }
         int vk = e.VirtualKey;
 
         if (_passThrough.Contains(vk))
@@ -132,7 +147,7 @@ internal sealed class KeyRouter : IDisposable
         var pending = new Pending { Down = e, Shift = IsKeyDown(VK_SHIFT), Tick = Environment.TickCount64 };
         // Modo reserva: seta de qualquer teclado vale como passador. Resolve no
         // próximo tick do timer (não executa nada dentro do hook).
-        if (KeyMap.IsArrow(vk) && _arrowsFromAnyKeyboard()) pending.FromPresenter = true;
+        if (fromSoftware || (KeyMap.IsArrow(vk) && _arrowsFromAnyKeyboard())) pending.FromPresenter = true;
         _pending.AddLast(pending);
         _timer.Enabled = true;
         return true;
@@ -272,7 +287,10 @@ internal sealed class KeyRouter : IDisposable
             type = INPUT_KEYBOARD,
             U = new InputUnion
             {
-                ki = new KEYBDINPUT { wVk = (ushort)e.VirtualKey, wScan = (ushort)e.ScanCode, dwFlags = flags },
+                ki = new KEYBDINPUT
+                {
+                    wVk = (ushort)e.VirtualKey, wScan = (ushort)e.ScanCode, dwFlags = flags, dwExtraInfo = ReplayTag,
+                },
             },
         };
         if (SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf<INPUT>()) != 1)

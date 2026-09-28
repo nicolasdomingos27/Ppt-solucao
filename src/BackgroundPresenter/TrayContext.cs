@@ -39,7 +39,7 @@ internal sealed class TrayContext : ApplicationContext
         _config = AppConfig.Load();
         _ppt = new PowerPointController();
         _sumatra = new SumatraController();
-        _matcher = new PresenterMatcher(_config.Presenter);
+        _matcher = new PresenterMatcher(_config.Presenters);
 
         _rawInput = new RawInputListener();
         _router = new KeyRouter(_ppt, _sumatra, _matcher, () => _config.EscapeAction,
@@ -100,14 +100,15 @@ internal sealed class TrayContext : ApplicationContext
 
         ApplyState();
         RefreshPresenterConnection();
-        if (_config.Presenter is null)
+        if (!_config.HasPresenter)
         {
             Log.Info("Nenhum passador configurado; abrindo tela de configuração.");
             ShowSetup();
         }
         else
         {
-            Log.Info($"Passador configurado: {_config.Presenter.Name} (VID {_config.Presenter.VendorId} / PID {_config.Presenter.ProductId})");
+            foreach (var p in _config.Presenters)
+                Log.Info($"Passador configurado: {p.Name} (VID {p.VendorId} / PID {p.ProductId})");
         }
     }
 
@@ -115,10 +116,10 @@ internal sealed class TrayContext : ApplicationContext
 
     private void ApplyState()
     {
-        _matcher.Presenter = _config.Presenter;
+        _matcher.Presenters = _config.Presenters;
         // O modo reserva funciona mesmo sem passador configurado.
         _router.Enabled = !_paused && _setup is null
-                          && (_config.Presenter is not null || _config.KeyboardArrowsControlSlides);
+                          && (_config.HasPresenter || _config.KeyboardArrowsControlSlides);
         _pauseItem.Text = _paused ? "Retomar" : "Pausar";
         UpdateTray();
     }
@@ -160,7 +161,7 @@ internal sealed class TrayContext : ApplicationContext
         bool connected = _matcher.IsConnected();
         if (connected == _presenterConnected) return;
         _presenterConnected = connected;
-        if (_config.Presenter is null) return;
+        if (!_config.HasPresenter) return;
         Log.Info(connected ? "Passador conectado." : "Passador NÃO encontrado (desconectado?).");
         if (!connected)
         {
@@ -179,7 +180,7 @@ internal sealed class TrayContext : ApplicationContext
         bool showRunning = _ppt.IsSlideShowActive || _sumatra.IsPresenting;
         TrayState state =
             _paused ? TrayState.Paused
-            : _config.Presenter is null || _presenterConnected != true ? TrayState.NoPresenter
+            : !_config.HasPresenter || _presenterConnected != true ? TrayState.NoPresenter
             : showRunning ? TrayState.Active
             : TrayState.Ready;
 
@@ -198,7 +199,7 @@ internal sealed class TrayContext : ApplicationContext
         string detail = state switch
         {
             TrayState.Paused => "Pausado — Ctrl+Alt+P para retomar",
-            TrayState.NoPresenter when _config.Presenter is null => "Passador não configurado",
+            TrayState.NoPresenter when !_config.HasPresenter => "Passador não configurado",
             TrayState.NoPresenter => "Passador não encontrado",
             _ => DescribeShow() ?? "Pronto — nenhuma apresentação rodando",
         };
@@ -241,7 +242,9 @@ internal sealed class TrayContext : ApplicationContext
             _setup = null;
             if (form.DialogResult == DialogResult.OK && form.Result is not null)
             {
-                _config.Presenter = form.Result;
+                if (!form.AddToExisting) _config.Presenters.Clear();
+                _config.Presenters.RemoveAll(p => p.DevicePath == form.Result.DevicePath);
+                _config.Presenters.Add(form.Result);
                 _config.EscapeAction = form.EscapeChoice;
                 if (!_config.TrySave())
                 {
@@ -250,7 +253,7 @@ internal sealed class TrayContext : ApplicationContext
                         "O passador vai funcionar agora, mas será pedido de novo na próxima vez.",
                         AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-                _icon.ShowBalloonTip(3000, AppName, $"Passador configurado: {form.Result.Name}", ToolTipIcon.Info);
+                _icon.ShowBalloonTip(3000, AppName, $"Passador configurado: {_config.PresenterNames}", ToolTipIcon.Info);
             }
             ApplyState();
             _presenterConnected = null;

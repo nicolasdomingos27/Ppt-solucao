@@ -4,7 +4,8 @@ using static BackgroundPresenter.NativeMethods;
 namespace BackgroundPresenter;
 
 /// <summary>Uma tecla vista pelo hook global.</summary>
-internal readonly record struct KeyEvent(int VirtualKey, int ScanCode, bool IsDown, bool IsExtended, bool IsInjected);
+internal readonly record struct KeyEvent(int VirtualKey, int ScanCode, bool IsDown, bool IsExtended, bool IsInjected,
+    IntPtr ExtraInfo = default);
 
 /// <summary>
 /// Hook global WH_KEYBOARD_LL. Precisa ser instalado numa thread com loop de
@@ -58,7 +59,7 @@ internal sealed class KeyboardHook : IDisposable
                 if (isDown || isUp)
                 {
                     var e = new KeyEvent((int)data.vkCode, (int)data.scanCode, isDown,
-                        (data.flags & LLKHF_EXTENDED) != 0, (data.flags & LLKHF_INJECTED) != 0);
+                        (data.flags & LLKHF_EXTENDED) != 0, (data.flags & LLKHF_INJECTED) != 0, data.dwExtraInfo);
                     if (_handler(e)) return (IntPtr)1; // engole
                 }
             }

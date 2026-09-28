@@ -10,6 +10,8 @@ Windows (C# .NET 8 / WinForms), portátil, sem instalação e sem admin.
 - [x] Etapa 2: Raw Input + filtro pelo passador, config.json, mapeamento completo de teclas
 - [x] Extra: Sumatra PDF em tela cheia/modo apresentação (teclas entregues via PostMessage)
 - [x] Extra: modo reserva, com as setas do teclado passando slide
+- [x] Extra: compatível com Logi Options+ (Spotlight), aceitando teclas geradas pelo software do fabricante;
+      permite cadastrar mais de um passador
 - [x] Etapa 3: ícone por estado (verde/amarelo/cinza/vermelho), "Slide X de Y", pausa + Ctrl+Alt+P,
       detecção do passador conectado/desconectado, log com rotação
 - [ ] Etapa 4: README.txt de uso no evento

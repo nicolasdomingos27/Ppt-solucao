@@ -94,15 +94,18 @@ internal sealed record DeviceInfo(string Path, string? VendorId, string? Product
 internal sealed class PresenterMatcher
 {
     private readonly Dictionary<IntPtr, bool> _cache = new();
-    private PresenterConfig? _presenter;
+    private IReadOnlyList<PresenterConfig> _presenters;
 
-    public PresenterMatcher(PresenterConfig? presenter) => _presenter = presenter;
+    public PresenterMatcher(IReadOnlyList<PresenterConfig> presenters) => _presenters = presenters;
 
-    public PresenterConfig? Presenter
+    public IReadOnlyList<PresenterConfig> Presenters
     {
-        get => _presenter;
-        set { _presenter = value; _cache.Clear(); }
+        get => _presenters;
+        set { _presenters = value; _cache.Clear(); }
     }
+
+    /// <summary>Há um passador do tipo "teclas geradas pelo software do fabricante".</summary>
+    public bool AcceptsSoftwareKeys => _presenters.Any(p => p.IsSoftwareSource);
 
     public void Reset() => _cache.Clear();
 
@@ -112,7 +115,9 @@ internal sealed class PresenterMatcher
     /// </summary>
     public bool IsConnected()
     {
-        if (_presenter is null) return false;
+        if (_presenters.Count == 0) return false;
+        // Com o software do fabricante não há como ver o aparelho; considera conectado.
+        if (AcceptsSoftwareKeys) return true;
         try
         {
             uint count = 0;
@@ -126,7 +131,7 @@ internal sealed class PresenterMatcher
             {
                 if (list[i].dwType != RIM_TYPEKEYBOARD) continue;
                 var info = DeviceInfo.Query(list[i].hDevice);
-                if (info is not null && _presenter.Matches(info)) return true;
+                if (info is not null && _presenters.Any(p => p.Matches(info))) return true;
             }
         }
         catch (Exception ex)
@@ -138,10 +143,10 @@ internal sealed class PresenterMatcher
 
     public bool IsPresenter(IntPtr hDevice)
     {
-        if (_presenter is null || hDevice == IntPtr.Zero) return false;
+        if (_presenters.Count == 0 || hDevice == IntPtr.Zero) return false;
         if (_cache.TryGetValue(hDevice, out bool cached)) return cached;
         var info = DeviceInfo.Query(hDevice);
-        bool result = info is not null && _presenter.Matches(info);
+        bool result = info is not null && _presenters.Any(p => p.Matches(info));
         _cache[hDevice] = result;
         if (result) Log.Info($"Passador reconhecido: {info!.Describe()}");
         return result;

@@ -14,6 +14,16 @@ internal enum EscapeAction
 /// <summary>Passador salvo. Casamos pelo caminho exato ou, se mudou de porta USB, por VID/PID/interface.</summary>
 internal sealed class PresenterConfig
 {
+    /// <summary>
+    /// "Aparelho" especial: teclas geradas pelo software do fabricante (ex.:
+    /// Logi Options+ com o Spotlight). Elas chegam como teclas injetadas, sem
+    /// aparelho físico associado.
+    /// </summary>
+    public const string SoftwareSourcePath = "software";
+
+    [JsonIgnore]
+    public bool IsSoftwareSource => DevicePath == SoftwareSourcePath;
+
     public string Name { get; set; } = "";
     public string DevicePath { get; set; } = "";
     public string? VendorId { get; set; }
@@ -31,6 +41,7 @@ internal sealed class PresenterConfig
 
     public bool Matches(DeviceInfo d)
     {
+        if (IsSoftwareSource) return false; // só casa com teclas injetadas, veja KeyRouter
         if (string.Equals(DevicePath, d.Path, StringComparison.OrdinalIgnoreCase)) return true;
         return VendorId is not null
                && string.Equals(VendorId, d.VendorId, StringComparison.OrdinalIgnoreCase)
@@ -51,7 +62,26 @@ internal sealed class AppConfig
 
     public static string FilePath { get; } = Path.Combine(AppPaths.BaseDirectory, "config.json");
 
-    public PresenterConfig? Presenter { get; set; }
+    /// <summary>Passadores aceitos (pode haver mais de um: reserva, Spotlight com e sem Logi Options+).</summary>
+    public List<PresenterConfig> Presenters { get; set; } = new();
+
+    /// <summary>Formato antigo (um só passador): lido e convertido para <see cref="Presenters"/>.</summary>
+    [JsonPropertyName("presenter")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PresenterConfig? LegacyPresenter
+    {
+        get => null;
+        set
+        {
+            if (value is not null && !Presenters.Exists(p => p.DevicePath == value.DevicePath)) Presenters.Add(value);
+        }
+    }
+
+    [JsonIgnore]
+    public bool HasPresenter => Presenters.Count > 0;
+
+    [JsonIgnore]
+    public string PresenterNames => string.Join(" + ", Presenters.Select(p => p.Name));
     public EscapeAction EscapeAction { get; set; } = EscapeAction.Ignore;
 
     /// <summary>
